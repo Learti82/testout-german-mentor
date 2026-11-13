@@ -28,81 +28,54 @@ lessons from that data (weaknesses, recurring mistakes, spaced-repetition due da
 - **Albanian support fades.** Translations are shown fully at A1, tap-to-reveal at A2, hidden at B1+ (or set manually).
 - **Strict but fair checking.** Offline checking accepts punctuation/umlaut variants and flags word-order errors separately; when AI is available, answers that the strict checker rejects are double-checked by the mentor so correct alternatives are accepted.
 
+## 100% free, no database, no API
+
+- **Your progress is saved in the browser** (localStorage) — no database, no account. The app asks the browser to keep the data permanently,
+  remembers the last page you used ("Vazhdo ku e le" on the dashboard) and resumes today's lesson where you stopped.
+  Clearing browser data or using a private window deletes it, so use **Settings → Ruaj kopje rezervë** now and then (JSON file, restorable on any computer).
+- **The AI mentor is free and runs on your own device** — no API key, no payment. Choose in **Settings → Mentori AI falas**:
+  - **In the browser (WebLLM):** a small open model (Qwen 2.5 1.5B/3B or Llama 3.1 8B) downloads once (1–5 GB) and is cached by the browser.
+    Needs a recent Chrome or Edge on a computer with WebGPU. Works offline afterwards.
+  - **Ollama on your computer:** install from ollama.com, run `ollama pull qwen2.5:7b`, select it in Settings. Bigger models give better corrections.
+  - **No AI:** grammar, vocabulary, question trainer, call-center phrases, mistakes, progress, weekly assessment and scripted
+    speaking/call-center practice all work without any AI.
+- Small local models are much weaker than paid cloud models: they correct most beginner mistakes but can occasionally be wrong,
+  especially in the Albanian explanations. The 8B model or Ollama with a 7–9B model gives clearly better results.
+
+## Run it
+
+```bash
+npm install
+npm run dev          # development: http://localhost:3000
+```
+or as a finished static site:
+```bash
+npm run build        # writes the site to ./out
+npm start            # serves ./out on http://localhost:3000
+```
+The `out` folder can also be hosted for free (GitHub Pages, Netlify, Cloudflare Pages). Use `localhost` or HTTPS so the microphone works.
+
 ## Architecture
 
 ```
 src/
-  app/                 Next.js App Router pages + /api/ai/* routes (server-only AI calls)
-  components/          AppShell, ExerciseRunner, ConversationPanel, FlashcardReview, PronunciationDrill, charts, UI
+  app/                 Pages (static export, no server code)
+  components/          AppShell, ExerciseRunner, ConversationPanel, FlashcardReview, PronunciationDrill, AiSetup, charts, UI
   content/             Curriculum: grammar (A1–B2), questions, call center, speaking scenarios, placement, reading/listening, seed vocabulary
   lib/
-    db/                Table definitions (single source of truth), local + Supabase stores, change batches
-    ai/                Provider abstraction (Anthropic SDK / OpenAI-compatible), prompts, zod schemas, access guard
-    srs.ts             Spaced repetition
-    grammar-progress.ts  Mastery ladder, level unlocking, spaced grammar reviews
-    level.ts           CEFR estimation from skill evidence
-    mistakes.ts        Mistake log, grouping, mistake → exercise
-    learning.ts        Records results into evidence / progress / mistakes
-    weakness.ts, recommendations.ts, session-plan.ts   Adaptive planning
-    memory.ts          Builds the mentor's persistent memory from structured records
+    db/                Browser storage (localStorage) with table-like collections
+    ai/                Free local engines (WebLLM / Ollama), compact prompts, zod schemas
+    srs.ts, grammar-progress.ts, level.ts, mistakes.ts, learning.ts, weakness.ts, recommendations.ts, session-plan.ts, memory.ts
 ```
 
-**Persistent memory** is not chat history: every AI request carries a compact summary built from the tables (`skill_evidence`, `mistakes`,
-`grammar_progress`, `vocabulary`/`srs_cards`, `mentor_memory` notes, recent `learning_sessions`). The AI writes durable observations back into `mentor_memory`.
+The mentor's **memory** is built from structured records (mistakes, grammar progress, vocabulary, notes, recent sessions) and sent with every AI request.
 
-**Storage.** All reads/writes go through a `Store` interface. Without Supabase the app uses `localStorage` (single browser). With Supabase and a login,
-the same rows go to Postgres tables protected by Row Level Security. Settings → Data has JSON export/import, and "upload browser data" after first login.
-
-**AI provider.** API keys live only in server environment variables; the browser calls `/api/ai/*`. Anthropic uses the official SDK with structured outputs
-(`claude-opus-5-5` by default, server-side refusal fallback enabled). Any OpenAI-compatible endpoint works via JSON mode + zod validation.
-If no provider is configured, every AI-dependent screen falls back to scripted/offline behaviour.
-
-## Setup
-
-```bash
-npm install
-cp .env.example .env.local   # fill in what you need (all optional)
-npm run dev                  # http://localhost:3000
-```
-
-### Environment variables
-
-| Variable | Required | Purpose |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | for AI (option A) | Claude API key (server only) |
-| `AI_MODEL` | no | Model id (default `claude-opus-5-5`; `claude-sonnet-5-5` / `claude-haiku-5-5` are cheaper and faster) |
-| `AI_PROVIDER` | no | `anthropic` or `openai-compatible` (auto-detected) |
-| `OPENAI_COMPATIBLE_BASE_URL`, `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_MODEL` | for AI (option B) | Any OpenAI-compatible chat-completions API |
-| `AI_ALLOW_MODEL_OVERRIDE` | no | `false` to disable choosing a model in Settings |
-| `APP_PASSCODE` | recommended when deployed | Required header for AI routes; enter it once in Settings |
-| `AI_REQUIRE_LOGIN` / `ALLOWED_EMAILS` | no | Require a Supabase login / restrict AI to specific accounts |
-| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | for cloud storage | Supabase project (anon key is public by design; data is protected by RLS) |
-
-### Supabase (optional, recommended for long-term use)
-1. Create a Supabase project.
-2. Run `supabase/migrations/0001_init.sql` in the SQL editor (or `supabase db push`). It creates 12 tables —
-   `profile, learning_sessions, vocabulary, srs_cards, grammar_progress, mistakes, conversations, daily_goals, weekly_assessments, mentor_memory, skill_evidence, study_plans` —
-   each with `user_id` + RLS policy "owner only".
-3. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`, restart, and create your account in **Settings → Account**.
-4. If you already practised in the browser, use **Upload browser data** once.
-
-The schema is generated from `src/lib/db/tables.ts` (`npm run gen:sql`); a unit test fails if the committed SQL drifts.
-
-### Microphone & voice
-Speech recognition uses the browser Web Speech API (Chrome, Edge, Safari; needs HTTPS or localhost and microphone permission). Text-to-speech uses the
-system's German voice. Firefox has no speech recognition — typing still works everywhere.
+Microphone input uses the browser's Web Speech API (Chrome, Edge, Safari). Text-to-speech uses the system's German voice.
 
 ## Scripts
 ```bash
-npm run dev        # development server
-npm run build      # production build (includes type checking)
-npm test           # unit tests for the learning engine, content integrity and schema sync
-npm run gen:sql    # regenerate the Supabase migration from the table definitions
+npm run dev     # development server
+npm run build   # static production build into ./out (includes type checking)
+npm start       # serve ./out
+npm test        # unit tests for the learning engine, content integrity and storage
 ```
-
-## Verified
-- `npm run build` and `npm test` (25 tests: answer checking, SRS, mastery/unlocking, CEFR estimation, mistakes, planning, content integrity, schema sync, AI schemas).
-- Browser end-to-end runs (Playwright) in both modes — **no AI** and **AI via a mock OpenAI-compatible server** — covering onboarding/placement,
-  7-day plan, dashboard, flashcards, daily grammar block, speaking correction + repeat step + vocabulary suggestion, the full weekly assessment and report,
-  every page, reload persistence, mobile width (no horizontal overflow) and dark mode, with zero console errors.
-- Not verified here: calls to the real Anthropic API (no key in the build environment) and a live Supabase project.

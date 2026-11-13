@@ -168,7 +168,7 @@ export function ExerciseRunner({
     let expected = local.expected;
 
     // Strict string matching can reject a correct alternative — let the mentor double-check open answers.
-    if (verdict !== "correct" && aiStatus?.available && (ex.type === "translate" || ex.type === "transform" || ex.type === "fix")) {
+    if (verdict !== "correct" && aiStatus?.available && aiStatus.warm && (ex.type === "translate" || ex.type === "transform" || ex.type === "fix")) {
       setChecking(true);
       try {
         const r = await ai.evaluateAnswer({ context: buildMentorContext(db), prompt: ex.prompt, promptSq: ex.promptSq, modelAnswer: ex.answers?.[0], answer, level: ex.level, topicId: ex.topicId });

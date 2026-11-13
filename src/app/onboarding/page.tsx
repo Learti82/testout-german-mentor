@@ -82,7 +82,7 @@ export default function Onboarding() {
     };
     const dbAfter = { ...db, profile: [updatedProfile] };
     let p = buildStudyPlan(dbAfter);
-    if (aiStatus?.available) {
+    if (aiStatus?.available && aiStatus.warm) {
       try {
         const r = await ai.plan({ context: buildMentorContext(dbAfter), results: { level, sections, weak: weak.map((w) => ({ topic: w.topicId, accuracy: w.acc })) } });
         if (r.days?.length >= 5) {

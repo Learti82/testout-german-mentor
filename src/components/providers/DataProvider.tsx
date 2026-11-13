@@ -1,18 +1,15 @@
 "use client";
 
-import type { Session } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { seedVocabulary } from "@/content/vocabulary";
-import { type AiStatus, fetchAiStatus } from "@/lib/ai/client";
+import { type AiStatus, engineStatus, subscribeEngine } from "@/lib/ai/engine";
 import { type Changes, applyChanges } from "@/lib/db/changes";
 import { LocalStore } from "@/lib/db/local-store";
-import { type Store, emptyDb } from "@/lib/db/store";
-import { SupabaseStore } from "@/lib/db/supabase-store";
+import { emptyDb } from "@/lib/db/store";
 import { TABLE_NAMES } from "@/lib/db/tables";
 import { estimateLevel } from "@/lib/level";
 import { initialProfile, translationLevel } from "@/lib/profile";
 import { newCard } from "@/lib/srs";
-import { getSupabase, supabaseConfigured } from "@/lib/supabase";
 import type { DB, Profile, TableName, TranslationLevel } from "@/lib/types";
 import { nowIso } from "@/lib/utils";
 
@@ -20,8 +17,8 @@ interface DataCtx {
   db: DB;
   ready: boolean;
   error: string | null;
-  mode: "local" | "supabase";
-  session: Session | null;
+  /** Browser asked to keep data even when disk is low */
+  persisted: boolean | null;
   ai: AiStatus | null;
   profile: Profile;
   translation: TranslationLevel;
@@ -30,10 +27,13 @@ interface DataCtx {
   replaceAll: (db: DB) => Promise<void>;
   resetAll: () => Promise<void>;
   refreshAi: () => Promise<void>;
-  reload: () => Promise<void>;
 }
 
 const Ctx = createContext<DataCtx | null>(null);
+const store = new LocalStore();
+
+/** Keep localStorage small: the evidence log is only needed for the last months. */
+const MAX_ROWS: Partial<Record<TableName, number>> = { skill_evidence: 6000, conversations: 150, learning_sessions: 3000 };
 
 function seed(): Changes {
   const vocab = seedVocabulary();
@@ -46,18 +46,20 @@ function normalize(partial: Partial<DB>): DB {
   return db;
 }
 
+function sortKey(r: Record<string, unknown>): string {
+  return String(r.at ?? r.updatedAt ?? r.startedAt ?? r.createdAt ?? "");
+}
+
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const [db, setDb] = useState<DB>(emptyDb());
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
   const [ai, setAi] = useState<AiStatus | null>(null);
-  const storeRef = useRef<Store>(new LocalStore());
+  const [persisted, setPersisted] = useState<boolean | null>(null);
   const dbRef = useRef(db);
   dbRef.current = db;
 
-  const load = useCallback(async (store: Store) => {
-    storeRef.current = store;
+  const load = useCallback(async () => {
     setReady(false);
     try {
       let loaded = normalize(await store.loadAll());
@@ -75,70 +77,67 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const refreshAi = useCallback(async () => setAi(await engineStatus()), []);
+
   useEffect(() => {
-    fetchAiStatus().then(setAi);
-    const sb = getSupabase();
-    if (!sb) {
-      load(new LocalStore());
-      return;
-    }
-    let current: string | null | undefined;
-    sb.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      current = data.session?.user.id ?? null;
-      load(data.session ? new SupabaseStore(sb) : new LocalStore());
+    void load();
+    void refreshAi();
+    // Ask the browser not to evict our data (best effort).
+    navigator.storage?.persist?.().then(setPersisted).catch(() => setPersisted(false));
+    // engine state changes (download finished, model loaded) → refresh availability
+    let last = "";
+    return subscribeEngine((s) => {
+      if (s.phase !== last && (s.phase === "ready" || s.phase === "error" || s.phase === "idle")) void refreshAi();
+      last = s.phase;
     });
-    const { data: sub } = sb.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
-      const id = s?.user.id ?? null;
-      if (current !== undefined && id !== current) {
-        current = id;
-        load(s ? new SupabaseStore(sb) : new LocalStore());
-      }
-    });
-    return () => sub.subscription.unsubscribe();
-  }, [load]);
+  }, [load, refreshAi]);
 
   const commit = useCallback(async (changes: Changes) => {
     setDb((prev) => applyChanges(prev, changes));
     try {
-      await Promise.all(
-        Object.entries(changes)
-          .filter(([, rows]) => (rows as unknown[])?.length)
-          .map(([t, rows]) => storeRef.current.upsert(t as TableName, rows as object[])),
-      );
+      for (const [t, rows] of Object.entries(changes) as [TableName, object[]][]) {
+        if (!rows?.length) continue;
+        await store.upsert(t, rows);
+        const max = MAX_ROWS[t];
+        const current = dbRef.current[t] as unknown as Record<string, unknown>[];
+        if (max && current.length + rows.length > max * 1.1) {
+          const all = [...current].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+          const drop = all.slice(0, all.length - max).map((r) => String(r.id));
+          await store.remove(t, drop);
+          setDb((prev) => ({ ...prev, [t]: (prev[t] as { id: string }[]).filter((r) => !drop.includes(r.id)) }));
+        }
+      }
     } catch (e) {
-      setError(`Saving failed: ${e instanceof Error ? e.message : String(e)}`);
+      setError(
+        e instanceof DOMException && e.name === "QuotaExceededError"
+          ? "Hapësira e shfletuesit është plot. Eksporto të dhënat te Cilësimet."
+          : `Ruajtja dështoi: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }, []);
 
   const remove = useCallback(async (table: TableName, ids: string[]) => {
     setDb((prev) => ({ ...prev, [table]: (prev[table] as { id: string }[]).filter((r) => !ids.includes(r.id)) }));
-    try {
-      await storeRef.current.remove(table, ids);
-    } catch (e) {
-      setError(`Delete failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    await store.remove(table, ids);
   }, []);
 
   const replaceAll = useCallback(
     async (next: DB) => {
-      await storeRef.current.clearAll();
-      await Promise.all(TABLE_NAMES.map((t) => storeRef.current.upsert(t, next[t] as object[])));
-      await load(storeRef.current);
+      await store.clearAll();
+      for (const t of TABLE_NAMES) await store.upsert(t, (next[t] ?? []) as object[]);
+      await load();
     },
     [load],
   );
 
   const resetAll = useCallback(async () => {
-    await storeRef.current.clearAll();
-    await load(storeRef.current);
+    await store.clearAll();
+    await load();
   }, [load]);
 
   const profile = db.profile[0] ?? initialProfile();
   const working = useMemo(() => estimateLevel(db).working, [db]);
 
-  // apply theme
   useEffect(() => {
     const t = profile.theme;
     try {
@@ -153,8 +152,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     db,
     ready,
     error,
-    mode: storeRef.current.kind,
-    session,
+    persisted,
     ai,
     profile,
     translation: translationLevel(profile, working),
@@ -162,8 +160,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     remove,
     replaceAll,
     resetAll,
-    refreshAi: async () => setAi(await fetchAiStatus()),
-    reload: () => load(storeRef.current),
+    refreshAi,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -174,10 +171,7 @@ export function useData(): DataCtx {
   return c;
 }
 
-/** Convenience: update the profile row. */
 export function useUpdateProfile() {
   const { commit, profile } = useData();
   return (patch: Partial<Profile>) => commit({ profile: [{ ...profile, ...patch, updatedAt: nowIso() }] });
 }
-
-export { supabaseConfigured };

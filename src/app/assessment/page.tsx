@@ -124,7 +124,7 @@ export default function AssessmentPage() {
       nextWeekPlan: plan.days.map((d) => `Dita ${d.day}: ${d.focusSq} — ${d.tasks.join(", ")}`),
       narrative: "",
     };
-    if (aiStatus?.available) {
+    if (aiStatus?.available && aiStatus.warm) {
       try {
         const n = await ai.weekly({ context: buildMentorContext(db), results: { sectionScores: scores, overall, previous: prev ? { overall: prev.overall, sectionScores: prev.sectionScores } : null, report } });
         report.narrative = n.narrativeSq;

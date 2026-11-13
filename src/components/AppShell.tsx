@@ -5,12 +5,15 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/icons";
 import { useData } from "@/components/providers/DataProvider";
+import { EngineIndicator } from "@/components/AiSetup";
 import { Notice, Spinner } from "@/components/ui";
 import { estimateLevel } from "@/lib/level";
 import { streak } from "@/lib/stats";
 import { cn } from "@/lib/utils";
 
-const NAV = [
+export const LAST_PLACE_KEY = "german-mentor:last-place";
+
+export const NAV = [
   { href: "/", label: "Dashboard", sq: "Paneli", icon: Icon.dashboard },
   { href: "/mentor", label: "AI Mentor", sq: "Mentori", icon: Icon.mentor },
   { href: "/speaking", label: "Sprechen", sq: "Të folurit", icon: Icon.mic },
@@ -50,7 +53,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { ready, db, profile, error, mode, ai } = useData();
+  const { ready, db, profile, error, ai } = useData();
   const path = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -60,6 +63,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       router.replace("/onboarding");
     }
   }, [ready, db.profile.length, profile.onboardingCompleted, path, router]);
+
+  // remember where the learner was, to offer "continue where you left off"
+  useEffect(() => {
+    if (path === "/" || path.startsWith("/onboarding")) return;
+    try {
+      localStorage.setItem(LAST_PLACE_KEY, JSON.stringify({ path: path + window.location.search, at: new Date().toISOString() }));
+    } catch {}
+  }, [path]);
 
   const est = ready ? estimateLevel(db) : null;
   const days = ready ? streak(db) : 0;
@@ -92,12 +103,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         <div className="flex justify-between">
           <span>Speicher</span>
-          <span className="font-medium text-text">{mode === "supabase" ? "Cloud" : "Browser"}</span>
+          <span className="font-medium text-text">Browser</span>
         </div>
-        <div className="flex justify-between">
+        <Link href="/settings" onClick={() => setOpen(false)} className="flex justify-between hover:text-text">
           <span>KI</span>
-          <span className={cn("font-medium", ai?.available ? "text-good" : "text-warn")}>{ai ? (ai.available ? "aktiv" : "offline") : "…"}</span>
-        </div>
+          <span className={cn("font-medium", ai?.available ? "text-good" : "text-warn")}>{ai ? (ai.available ? "aktiv" : "aktivizo →") : "…"}</span>
+        </Link>
       </div>
     </div>
   );
@@ -129,6 +140,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         )}
       </main>
+      <EngineIndicator />
     </div>
   );
 }

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { GRAMMAR_TOPICS, TOPIC_BY_ID, matchTopic, topicsByLevel } from "@/content/grammar";
 import { PLACEMENT } from "@/content/assessment";
@@ -10,7 +9,9 @@ import { checkAnswer, compareSpoken } from "../answer-check";
 import { ConverseResponseSchema, GeneratedExercisesSchema } from "../ai/schemas";
 import { applyChanges } from "../db/changes";
 import { emptyDb } from "../db/store";
-import { generateSql, rowFromDb, rowToDb } from "../db/tables";
+import { LocalStore } from "../db/local-store";
+import { TABLE_NAMES } from "../db/tables";
+import { converseSystem } from "../ai/prompts";
 import { applyTest, computeStatus, emptyProgress, unlockedLevels } from "../grammar-progress";
 import { expectedSentence, originalSentence, recordResults, type ExerciseResult } from "../learning";
 import { estimateLevel } from "../level";
@@ -212,14 +213,36 @@ describe("content integrity", () => {
   });
 });
 
-describe("database schema", () => {
-  it("committed migration matches the table definitions", () => {
-    expect(readFileSync("supabase/migrations/0001_init.sql", "utf8")).toBe(generateSql());
-  });
-  it("round-trips rows through snake_case", () => {
+describe("browser storage", () => {
+  it("saves, updates and deletes rows in localStorage", async () => {
+    const mem = new Map<string, string>();
+    (globalThis as unknown as { localStorage: Storage }).localStorage = {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => void mem.set(k, v),
+      removeItem: (k: string) => void mem.delete(k),
+      clear: () => mem.clear(),
+      key: () => null,
+      length: 0,
+    } as Storage;
+    const st = new LocalStore();
     const p = initialProfile();
-    const back = rowFromDb<typeof p>("profile", rowToDb("profile", p));
-    expect(back).toEqual(p);
+    await st.upsert("profile", [p]);
+    await st.upsert("profile", [{ ...p, displayName: "Arben" }]);
+    const all = await st.loadAll();
+    expect(all.profile).toHaveLength(1);
+    expect(all.profile?.[0].displayName).toBe("Arben");
+    await st.remove("profile", [p.id]);
+    expect((await st.loadAll()).profile).toHaveLength(0);
+    expect(Object.keys(all)).toEqual(TABLE_NAMES);
+  });
+});
+
+describe("prompt size for small local models", () => {
+  it("conversation system prompt stays well inside a 4k-token context", () => {
+    const db = baseDb();
+    const sys = converseSystem("callcenter", buildMentorContext(db), { title: "Test", context: "x".repeat(400), level: "A2", goals: ["a", "b"] });
+    // ~4 chars per token
+    expect(sys.length / 4).toBeLessThan(1400);
   });
 });
 

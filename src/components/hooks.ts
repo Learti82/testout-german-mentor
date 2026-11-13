@@ -23,12 +23,12 @@ export function useDailyGoal(): DailyGoal | null {
   }, [ready, existing, db, commit, profile.onboardingCompleted]);
 
   useEffect(() => {
-    if (!existing || existing.generatedBy === "ai" || !aiStatus?.available || enriching.current) return;
+    if (!existing || existing.generatedBy === "ai" || !aiStatus?.available || !aiStatus.warm || enriching.current) return;
     enriching.current = true;
     ai.briefing({ context: buildMentorContext(db), analysis: { recommendation: existing.recommendation, tasks: existing.tasks } })
       .then((b) => commit({ daily_goals: [{ ...existing, mentorMessage: b.messageSq, generatedBy: "ai" }] }))
       .catch(() => {});
-  }, [existing, aiStatus?.available, db, commit]);
+  }, [existing, aiStatus?.available, aiStatus?.warm, db, commit]);
 
   return existing;
 }

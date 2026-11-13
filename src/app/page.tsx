@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { LAST_PLACE_KEY, NAV } from "@/components/AppShell";
 import { TOPIC_BY_ID } from "@/content/grammar";
 import { BarChart } from "@/components/charts";
 import { useDailyGoal, useWeeklyDue } from "@/components/hooks";
@@ -34,6 +36,18 @@ export default function Dashboard() {
   const today = minutesToday(db);
   const rec = goal?.recommendation;
   const hour = new Date().getHours();
+  const [last, setLast] = useState<{ path: string; label: string; at: string } | null>(null);
+  useEffect(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(LAST_PLACE_KEY) ?? "null") as { path: string; at: string } | null;
+      if (v?.path) {
+        const base = "/" + v.path.split(/[/?]/)[1];
+        const nav = NAV.find((n) => n.href === base);
+        const label = base === "/session" ? "Mësimi i sotëm" : nav?.sq ?? v.path;
+        setLast({ path: v.path, label, at: v.at });
+      }
+    } catch {}
+  }, []);
   const greeting = hour < 11 ? "Guten Morgen" : hour < 18 ? "Guten Tag" : "Guten Abend";
 
   return (
@@ -43,6 +57,17 @@ export default function Dashboard() {
           Fillo mësimin e sotëm <Icon.arrow />
         </LinkButton>
       </PageHeader>
+
+      {last && (
+        <Link href={last.path} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-5 py-3 hover:border-accent">
+          <span className="text-sm">
+            <span className="text-muted">Vazhdo ku e le: </span>
+            <span className="font-medium">{last.label}</span>
+            <span className="ml-2 text-xs text-muted">{new Date(last.at).toLocaleString("sq-AL", { dateStyle: "medium", timeStyle: "short" })}</span>
+          </span>
+          <Icon.arrow />
+        </Link>
+      )}
 
       {weekly.due && (
         <Notice tone="warn" className="flex flex-wrap items-center justify-between gap-3">

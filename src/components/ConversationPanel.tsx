@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { SpeakButton } from "@/components/ExerciseRunner";
 import { Icon } from "@/components/icons";
@@ -351,8 +352,9 @@ export function ConversationPanel({
 
   if (!useAi && !script?.length) {
     return (
-      <Notice tone="warn">
-        Kjo pjesë kërkon mentorin AI. Konfiguro një çelës API në server (shiko Settings → AI) ose përdor ushtrimet e tjera, të cilat funksionojnë pa AI.
+      <Notice tone="warn" className="flex flex-wrap items-center justify-between gap-3">
+        <span>Kjo pjesë kërkon mentorin AI. Aktivizoje falas (pa API, punon në kompjuterin tënd) te Cilësimet.</span>
+        <Link href="/settings" className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg">Aktivizo AI falas</Link>
       </Notice>
     );
   }
@@ -361,7 +363,7 @@ export function ConversationPanel({
     <div className="space-y-4">
       {!useAi && (
         <Notice tone="info">
-          Modaliteti pa AI: pyetjet janë të paracaktuara dhe krahasohen me një përgjigje model. Me AI, mentori analizon çdo fjali dhe të korrigjon.
+          Modaliteti pa AI: pyetjet janë të paracaktuara dhe krahasohen me një përgjigje model. Me AI (falas, te <Link href="/settings" className="underline">Cilësimet</Link>), mentori analizon çdo fjali dhe të korrigjon.
         </Notice>
       )}
       <Card className="p-0">

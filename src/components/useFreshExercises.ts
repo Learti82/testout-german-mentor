@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { TOPIC_BY_ID } from "@/content/grammar";
 import { useData } from "@/components/providers/DataProvider";
 import { ai } from "@/lib/ai/client";
+import { loadEngineSettings } from "@/lib/ai/engine";
 import { pickExercises } from "@/lib/exercise-select";
 import { buildMentorContext } from "@/lib/memory";
 import type { CEFR, Exercise } from "@/lib/types";
@@ -22,7 +23,7 @@ export function useFreshExercises(opts: { key: string; topicId: string; pool: Ex
   useEffect(() => {
     if (opts.enabled === false || aiStatus === null || started.current === opts.key) return;
     started.current = opts.key;
-    const share = aiStatus.available ? (opts.aiShare ?? 0.5) : 0;
+    const share = aiStatus.available && loadEngineSettings().generateExercises ? (opts.aiShare ?? 0.5) : 0;
     const nAi = Math.round(opts.count * share);
     const bank = pickExercises(db, opts.pool, opts.count - nAi, { seed: opts.key });
     if (!nAi) {
@@ -32,7 +33,7 @@ export function useFreshExercises(opts: { key: string; topicId: string; pool: Ex
     const topic = TOPIC_BY_ID[opts.topicId];
     const level = (topic?.level ?? "A1") as CEFR;
     const mistakes = db.mistakes.filter((m) => m.topicId === opts.topicId && !m.resolved).slice(0, 6).map((m) => `${m.original} → ${m.corrected}`);
-    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 25000));
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 90000));
     Promise.race([
       ai.generate({
         context: buildMentorContext(db),
